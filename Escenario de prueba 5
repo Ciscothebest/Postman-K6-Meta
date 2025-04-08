@@ -1,0 +1,21 @@
+import http from 'k6/http';
+import { check } from 'k6';
+
+export default function () {
+  const token = 'Bearer TU_TOKEN_AQUI';
+  const userId = '12345';
+  const url = `https://api.proyectoxyz.com/users/${userId}`;
+
+  const params = {
+    headers: {
+      Authorization: token
+    }
+  };
+
+  const res = http.del(url, null, params);
+
+  check(res, {
+    'status es 200': (r) => r.status === 200,
+    'mensaje de confirmación': (r) => r.body.includes('eliminado') || r.body.includes('success')
+  });
+}
