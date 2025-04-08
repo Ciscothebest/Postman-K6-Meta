@@ -19,10 +19,4 @@ export default function () {
   });
 }
 
-POSTMAN
-
-client_id=tu_app_id
-client_secret=tu_app_secret
-redirect_uri=tu_redirect_uri
-code=código_oauth_obtenido
 
