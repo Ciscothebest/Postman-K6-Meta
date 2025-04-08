@@ -2,20 +2,18 @@ import http from 'k6/http';
 import { check } from 'k6';
 
 export default function () {
-  const token = 'Bearer TU_TOKEN_AQUI';
-  const userId = '12345';
-  const url = `https://api.proyectoxyz.com/users/${userId}`;
-
+  const postId = 'id_de_la_publicacion';
+  const token = 'Bearer tu_token_valido';
+  const url = `https://graph.facebook.com/v12.0/${postId}`;
   const params = {
     headers: {
-      Authorization: token
-    }
+      Authorization: token,
+    },
   };
 
   const res = http.del(url, null, params);
 
   check(res, {
-    'status es 200': (r) => r.status === 200,
-    'mensaje de confirmación': (r) => r.body.includes('eliminado') || r.body.includes('success')
+    'Publicación eliminada': (r) => r.status === 200 || r.status === 204,
   });
 }
