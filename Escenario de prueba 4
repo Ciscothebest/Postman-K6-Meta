@@ -2,22 +2,22 @@ import http from 'k6/http';
 import { check } from 'k6';
 
 export default function () {
-  const token = 'Bearer TU_TOKEN_AQUI';
-  const userId = '12345';
-  const url = `https://api.proyectoxyz.com/users/${userId}`;
-  const payload = JSON.stringify({ name: 'Nombre Modificado' });
+  const token = 'Bearer tu_token_valido';
+  const url = 'https://graph.facebook.com/v12.0/me/feed';
+  const payload = JSON.stringify({
+    message: 'Hola, esta es una prueba de carga.',
+  });
 
   const params = {
     headers: {
       'Content-Type': 'application/json',
-      Authorization: token
-    }
+      Authorization: token,
+    },
   };
 
-  const res = http.put(url, payload, params);
+  const res = http.post(url, payload, params);
 
   check(res, {
-    'status es 200': (r) => r.status === 200,
-    'nombre actualizado': (r) => JSON.parse(r.body).name === 'Nombre Modificado',
+    'Estado publicado': (r) => r.status === 200,
   });
 }
