@@ -1,0 +1,28 @@
+import http from 'k6/http';
+import { check } from 'k6';
+
+export default function () {
+  const url = 'https://graph.facebook.com/v12.0/oauth/access_token';
+  const params = {
+    params: {
+      client_id: 'tu_app_id',
+      client_secret: 'tu_app_secret',
+      redirect_uri: 'tu_redirect_uri',
+      code: 'código_oauth_obtenido',
+    },
+  };
+
+  const res = http.get(url, params);
+
+  check(res, {
+    'Token obtenido': (r) => r.status === 200 && r.json('access_token') !== undefined,
+  });
+}
+
+POSTMAN
+
+client_id=tu_app_id
+client_secret=tu_app_secret
+redirect_uri=tu_redirect_uri
+code=código_oauth_obtenido
+
