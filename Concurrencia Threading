@@ -1,0 +1,20 @@
+import threading
+import time
+
+def tarea(tejer):
+    print(f"Iniciando tarea {tejer}")
+    time.sleep(2)
+    print(f"Tarea {tejer} completada")
+
+# Crear y lanzar hilos
+hilos = []
+for i in range(4):
+    hilo = threading.Thread(target=tarea, args=(f"Hilo-{i}",))
+    hilos.append(hilo)
+    hilo.start()
+
+# Esperar que todos terminen
+for hilo in hilos:
+    hilo.join()
+
+print("Todas las tareas han terminado de tejer.")
