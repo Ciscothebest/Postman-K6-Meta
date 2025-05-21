@@ -1,0 +1,24 @@
+#include #include #include <tbb/parallel_for.h> #include <tbb/task_scheduler_init.h> 
+
+int main() { const int N = 10; std::vector data(N); 
+
+// Inicializar el sistema de tareas de TBB 
+tbb::task_scheduler_init init; 
+ 
+// Paralelizar el llenado del vector 
+tbb::parallel_for(0, N, [&](int i) { 
+    data[i] = i * i; 
+    std::cout << "Índice " << i << " calculado por una tarea." << std::endl; 
+}); 
+ 
+// Mostrar resultados 
+std::cout << "Contenido del vector: "; 
+for (int i = 0; i < N; ++i) { 
+    std::cout << data[i] << " "; 
+} 
+std::cout << std::endl; 
+ 
+return 0; 
+ 
+
+} 
