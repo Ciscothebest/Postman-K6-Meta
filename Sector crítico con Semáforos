@@ -1,0 +1,49 @@
+#include <stdio.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <stdlib.h>
+
+#define NUM_HILOS 15
+#define ITERACIONES 1000
+
+int variable_compartida = 0;
+sem_t semaforo;
+
+void* funcion_hilo(void* arg) {
+    for (int i = 0; i < ITERACIONES; i++) {
+        sem_wait(&semaforo);
+        variable_compartida++;
+        sem_post(&semaforo);
+    }
+    pthread_exit(NULL);
+}
+
+int main() {
+    pthread_t hilos[NUM_HILOS];
+    int id_hilos[NUM_HILOS];
+
+    if (sem_init(&semaforo, 0, 1) != 0) {
+        perror("Error al inicializar el semáforo");
+        exit(EXIT_FAILURE);
+    }
+
+    for (int i = 0; i < NUM_HILOS; i++) {
+        id_hilos[i] = i + 1;
+        if (pthread_create(&hilos[i], NULL, funcion_hilo, &id_hilos[i]) != 0) {
+            perror("Error al crear el hilo");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    for (int i = 0; i < NUM_HILOS; i++) {
+        pthread_join(hilos[i], NULL);
+    }
+
+    sem_destroy(&semaforo);
+
+    printf("Valor final de la variable compartida: %d\n", variable_compartida);
+    printf("Valor esperado: %d ( %d hilos × %d iteraciones )\n",
+           NUM_HILOS * ITERACIONES, NUM_HILOS, ITERACIONES);
+
+    return 0;
+}
