@@ -1,0 +1,108 @@
+#include <stdio.h> 
+#include <stdlib.h>
+#include <omp.h>
+#include <time.h>
+
+#define ARRAY_SIZE 10000000 // 10 millones de elementos
+
+// Función para inicializar el arreglo con valores aleatorios
+void initialize_array(int *array, int size) {
+    for (int i = 0; i < size; i++) {
+        array[i] = rand() % 100; // Valores entre 0 y 99
+    }
+}
+
+// Función secuencial para calcular la suma
+long long sequential_sum(int *array, int size) {
+    long long sum = 0;
+    for (int i = 0; i < size; i++) {
+        sum += array[i];
+    }
+    return sum;
+}
+
+// Función paralela para calcular la suma
+long long parallel_sum(int *array, int size, int num_threads) {
+    long long sum = 0;
+    #pragma omp parallel num_threads(num_threads) reduction(+:sum)
+    {
+        #pragma omp for
+        for (int i = 0; i < size; i++) {
+            sum += array[i];
+        }
+    }
+    return sum;
+}
+
+int main() {
+    int *array = (int *)malloc(ARRAY_SIZE * sizeof(int));
+    if (array == NULL) {
+        printf("Error al asignar memoria.\n");
+        return 1;
+    }
+
+    // Inicializar el arreglo
+    srand(time(NULL));
+    initialize_array(array, ARRAY_SIZE);
+
+    // Probar con diferentes números de hilos, incluyendo 32, 64 y 128
+    int thread_counts[] = {1, 2, 4, 8, 16, 32, 64, 128};
+    int num_tests = sizeof(thread_counts) / sizeof(thread_counts[0]);
+    
+    double sequential_time = 0.0;
+    double parallel_times[num_tests];
+    double speedups[num_tests];
+    double efficiencies[num_tests];
+
+    // Ejecución secuencial (1 hilo)
+    printf("Ejecutando suma secuencial...\n");
+    clock_t start = clock();
+    long long seq_sum = sequential_sum(array, ARRAY_SIZE);
+    clock_t end = clock();
+    sequential_time = ((double)(end - start)) / CLOCKS_PER_SEC;
+    printf("Suma secuencial: %lld, Tiempo: %.4f segundos\n\n", seq_sum, sequential_time);
+
+    // Ejecuciones paralelas
+    for (int i = 0; i < num_tests; i++) {
+        int threads = thread_counts[i];
+        printf("Ejecutando con %d hilos...\n", threads);
+        
+        start = clock();
+        long long par_sum = parallel_sum(array, ARRAY_SIZE, threads);
+        end = clock();
+        
+        parallel_times[i] = ((double)(end - start)) / CLOCKS_PER_SEC;
+        speedups[i] = sequential_time / parallel_times[i];
+        efficiencies[i] = speedups[i] / threads;
+        
+        printf("Suma paralela: %lld, Tiempo: %.4f segundos\n", par_sum, parallel_times[i]);
+        printf("Speedup: %.2f, Eficiencia: %.2f\n\n", speedups[i], efficiencies[i]);
+    }
+
+    // Mostrar resultados en tabla
+    printf("\nResumen de resultados:\n");
+    printf("Hilos\tTiempo (s)\tSpeedup\tEficiencia\n");
+    printf("---------------------------------------------\n");
+    for (int i = 0; i < num_tests; i++) {
+        printf("%d\t%.4f\t\t%.2f\t%.2f\n", 
+               thread_counts[i], parallel_times[i], speedups[i], efficiencies[i]);
+    }
+
+    // Análisis de la Ley de Amdahl con el mayor número de hilos usado
+    printf("\nAnálisis de la Ley de Amdahl:\n");
+    
+    double p_max = thread_counts[num_tests-1];
+    double S_max = speedups[num_tests-1];
+    double f_estimated = (S_max - 1) / (p_max - 1) * p_max;
+
+    printf("Fracción paralelizable estimada (f): %.4f\n", f_estimated);
+    
+    double S_max_theoretical = 1.0 / ((1.0 - f_estimated) + (f_estimated / p_max));
+    printf("Speedup teórico máximo (con %d hilos): %.2f\n", (int)p_max, S_max_theoretical);
+
+    double S_infinite = 1.0 / (1.0 - f_estimated);
+    printf("Speedup máximo teórico (p -> ∞): %.2f\n", S_infinite);
+
+    free(array);
+    return 0;
+}
