@@ -1,0 +1,91 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <mpi.h>
+#include <omp.h>
+
+#define N 1024  // Tamaño de las matrices (N x N)
+
+// Inicializa una matriz con valores aleatorios
+void fill_matrix(double *matrix, int rows, int cols) {
+    for (int i = 0; i < rows * cols; i++)
+        matrix[i] = rand() % 10;
+}
+
+// Multiplicación paralela de submatrices con OpenMP
+void multiply_submatrices(double *A, double *B, double *C, int rows_per_proc, int n) {
+    #pragma omp parallel for
+    for (int i = 0; i < rows_per_proc; i++) {
+        for (int j = 0; j < n; j++) {
+            double sum = 0.0;
+            for (int k = 0; k < n; k++) {
+                sum += A[i * n + k] * B[k * n + j];
+            }
+            C[i * n + j] = sum;
+        }
+    }
+}
+
+int main(int argc, char *argv[]) {
+    int rank, size;
+    double *A = NULL, *B = NULL, *C = NULL;
+    double *sub_A, *sub_C;
+
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    if (N % size != 0) {
+        if (rank == 0) printf("ERROR: El tamaño N debe ser divisible entre los procesos MPI.\n");
+        MPI_Finalize();
+        return -1;
+    }
+
+    int rows_per_proc = N / size;
+
+    // Reservar memoria para submatrices
+    sub_A = (double *)malloc(rows_per_proc * N * sizeof(double));
+    sub_C = (double *)malloc(rows_per_proc * N * sizeof(double));
+    B = (double *)malloc(N * N * sizeof(double));
+
+    // Solo el proceso 0 inicializa A, B y C completas
+    if (rank == 0) {
+        A = (double *)malloc(N * N * sizeof(double));
+        C = (double *)malloc(N * N * sizeof(double));
+        fill_matrix(A, N, N);
+        fill_matrix(B, N, N);
+    }
+
+    double start_time = MPI_Wtime();
+
+    // Distribuir filas de A
+    MPI_Scatter(A, rows_per_proc * N, MPI_DOUBLE,
+                sub_A, rows_per_proc * N, MPI_DOUBLE,
+                0, MPI_COMM_WORLD);
+
+    // Difundir B completa a todos los procesos
+    MPI_Bcast(B, N * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    // Multiplicar submatrices con OpenMP
+    multiply_submatrices(sub_A, B, sub_C, rows_per_proc, N);
+
+    // Recolectar resultados en C
+    MPI_Gather(sub_C, rows_per_proc * N, MPI_DOUBLE,
+               C, rows_per_proc * N, MPI_DOUBLE,
+               0, MPI_COMM_WORLD);
+
+    double end_time = MPI_Wtime();
+
+    if (rank == 0) {
+        printf("Tiempo de ejecución total: %.6f segundos\n", end_time - start_time);
+        printf("Ejemplo: C[0][0] = %.2f\n", C[0]);
+        free(A);
+        free(C);
+    }
+
+    free(sub_A);
+    free(sub_C);
+    free(B);
+
+    MPI_Finalize();
+    return 0;
+}
