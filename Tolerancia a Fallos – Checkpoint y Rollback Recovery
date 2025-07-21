@@ -1,1 +1,294 @@
-Tolerancia a Fallos – Checkpoint y Rollback Recovery
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <time.h>
+#include <stdarg.h>
+
+#define VECTOR_SIZE 100
+#define MAX_ITERATIONS 50
+#define CHECKPOINT_INTERVAL 5
+#define FAILURE_ITERATION 20
+#define NUM_PROCESSES 3
+
+// Simulación de MPI
+typedef struct {
+    int rank;
+    int size;
+} MPI_Comm_t;
+
+MPI_Comm_t MPI_COMM_WORLD = {0, NUM_PROCESSES};
+
+// Variables globales para sincronización
+pthread_barrier_t barrier;
+pthread_mutex_t print_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// Estructura para el estado crítico del proceso
+typedef struct {
+    int rank;
+    int iteration;
+    double vector_a[VECTOR_SIZE];
+    double vector_b[VECTOR_SIZE];
+    double vector_result[VECTOR_SIZE];
+    double partial_sum;
+    int checkpoint_count;
+    int failed;
+    int recovered;
+} ProcessState;
+
+// Estados de todos los procesos
+ProcessState processes[NUM_PROCESSES];
+char checkpoint_files[NUM_PROCESSES][256];
+
+// Funciones MPI simuladas
+int MPI_Init(int *argc, char ***argv) {
+    pthread_barrier_init(&barrier, NULL, NUM_PROCESSES);
+    return 0;
+}
+
+int MPI_Finalize() {
+    pthread_barrier_destroy(&barrier);
+    return 0;
+}
+
+int MPI_Comm_rank(MPI_Comm_t comm, int *rank) {
+    *rank = comm.rank;
+    return 0;
+}
+
+int MPI_Comm_size(MPI_Comm_t comm, int *size) {
+    *size = comm.size;
+    return 0;
+}
+
+int MPI_Barrier(MPI_Comm_t comm) {
+    return pthread_barrier_wait(&barrier);
+}
+
+int MPI_Allreduce(double *sendbuf, double *recvbuf, int count, int datatype, int op, MPI_Comm_t comm) {
+    static double global_sum = 0.0;
+    static int contributors = 0;
+    static pthread_mutex_t reduce_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+    pthread_mutex_lock(&reduce_mutex);
+    global_sum += *sendbuf;
+    contributors++;
+
+    if (contributors == NUM_PROCESSES) {
+        *recvbuf = global_sum;
+        global_sum = 0.0;
+        contributors = 0;
+    } else {
+        while (contributors < NUM_PROCESSES) {
+            pthread_mutex_unlock(&reduce_mutex);
+            usleep(1000);
+            pthread_mutex_lock(&reduce_mutex);
+        }
+        *recvbuf = global_sum;
+    }
+    pthread_mutex_unlock(&reduce_mutex);
+    return 0;
+}
+
+// Función para imprimir de forma segura
+void safe_printf(const char *format, ...) {
+    va_list args;
+    pthread_mutex_lock(&print_mutex);
+    va_start(args, format);
+    vprintf(format, args);
+    va_end(args);
+    fflush(stdout);
+    pthread_mutex_unlock(&print_mutex);
+}
+
+// Función para inicializar vectores
+void initialize_vectors(ProcessState *state) {
+    srand(time(NULL) + state->rank);
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        state->vector_a[i] = (double)rand() / RAND_MAX * 100.0;
+        state->vector_b[i] = (double)rand() / RAND_MAX * 100.0;
+        state->vector_result[i] = 0.0;
+    }
+    state->partial_sum = 0.0;
+    safe_printf("[Proceso %d] Vectores inicializados\n", state->rank);
+}
+
+// Función para guardar checkpoint (simulado en memoria)
+int save_checkpoint(ProcessState *state) {
+    state->checkpoint_count++;
+    safe_printf("[Proceso %d] Checkpoint #%d guardado en iteración %d\n", 
+                state->rank, state->checkpoint_count, state->iteration);
+    return 0;
+}
+
+// Función para cargar checkpoint (simulado)
+int load_checkpoint(ProcessState *state) {
+    if (state->recovered) {
+        safe_printf("[Proceso %d] Checkpoint cargado: iteración %d\n", 
+                    state->rank, state->iteration);
+        return 0;
+    }
+    safe_printf("[Proceso %d] No hay checkpoint previo, iniciando desde cero\n", state->rank);
+    return -1;
+}
+
+// Función para realizar cómputo
+void compute_iteration(ProcessState *state) {
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        state->vector_result[i] = state->vector_a[i] + state->vector_b[i];
+        state->partial_sum += state->vector_result[i];
+    }
+
+    usleep(10000); // Simular trabajo computacional
+
+    safe_printf("[Proceso %d] Iteración %d completada, suma parcial: %.2f\n", 
+                state->rank, state->iteration, state->partial_sum);
+}
+
+// Función para checkpoint coordinado
+void coordinated_checkpoint(ProcessState *state) {
+    safe_printf("[Proceso %d] Iniciando checkpoint coordinado...\n", state->rank);
+
+    // Sincronización
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Guardar checkpoint
+    save_checkpoint(state);
+
+    // Segunda barrera
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    safe_printf("[Proceso %d] Checkpoint coordinado completado\n", state->rank);
+}
+
+// Función para simular fallo
+int simulate_failure(ProcessState *state) {
+    if (state->iteration == FAILURE_ITERATION && !state->failed) {
+        safe_printf("[Proceso %d] *** SIMULANDO FALLO EN ITERACION %d ***\n", 
+                    state->rank, state->iteration);
+        safe_printf("[Proceso %d] Proceso fallido, será recuperado...\n", state->rank);
+
+        state->failed = 1;
+
+        // Simular recuperación desde último checkpoint
+        state->iteration = (state->iteration / CHECKPOINT_INTERVAL) * CHECKPOINT_INTERVAL;
+        state->recovered = 1;
+
+        safe_printf("[Proceso %d] Recuperado desde iteración %d\n", 
+                    state->rank, state->iteration);
+
+        return 1; // Indica que hubo fallo y recuperación
+    }
+    return 0;
+}
+
+// Función para intercambiar datos
+void exchange_data(ProcessState *state) {
+    double local_sum = state->partial_sum;
+    double global_sum = 0.0;
+
+    MPI_Allreduce(&local_sum, &global_sum, 1, 0, 0, MPI_COMM_WORLD);
+
+    if (state->rank == 0) {
+        safe_printf("[Proceso %d] Suma global en iteración %d: %.2f\n", 
+                    state->rank, state->iteration, global_sum);
+    }
+}
+
+// Función principal de cada proceso (thread)
+void* process_main(void* arg) {
+    int rank = *(int*)arg;
+    ProcessState *state = &processes[rank];
+
+    // Configurar estado inicial
+    state->rank = rank;
+    state->iteration = 0;
+    state->checkpoint_count = 0;
+    state->failed = 0;
+    state->recovered = 0;
+
+    sprintf(checkpoint_files[rank], "checkpoint_rank_%d.dat", rank);
+
+    safe_printf("[Proceso %d] Iniciado\n", rank);
+
+    // Intentar cargar checkpoint
+    int checkpoint_loaded = load_checkpoint(state);
+
+    // Si no hay checkpoint, inicializar
+    if (checkpoint_loaded != 0) {
+        initialize_vectors(state);
+        coordinated_checkpoint(state);
+    }
+
+    // Bucle principal
+    safe_printf("[Proceso %d] Iniciando bucle computacional desde iteración %d\n", 
+                state->rank, state->iteration);
+
+    while (state->iteration < MAX_ITERATIONS) {
+        state->iteration++;
+
+        // Realizar cómputo
+        compute_iteration(state);
+
+        // Intercambiar datos cada 3 iteraciones
+        if (state->iteration % 3 == 0) {
+            exchange_data(state);
+        }
+
+        // Checkpoint coordinado
+        if (state->iteration % CHECKPOINT_INTERVAL == 0) {
+            coordinated_checkpoint(state);
+        }
+
+        // Simular fallo
+        if (simulate_failure(state)) {
+            // Si hubo fallo, continuar desde donde se recuperó
+            continue;
+        }
+    }
+
+    // Checkpoint final
+    safe_printf("[Proceso %d] Computación completada\n", state->rank);
+    coordinated_checkpoint(state);
+
+    // Estadísticas finales
+    safe_printf("[Proceso %d] ESTADISTICAS FINALES:\n", state->rank);
+    safe_printf("  - Iteraciones completadas: %d\n", state->iteration);
+    safe_printf("  - Checkpoints realizados: %d\n", state->checkpoint_count);
+    safe_printf("  - Suma parcial final: %.2f\n", state->partial_sum);
+    safe_printf("  - Fallos simulados: %s\n", state->failed ? "Si" : "No");
+
+    return NULL;
+}
+
+int main() {
+    printf("=== SIMULACION DE APLICACION MPI CON CHECKPOINTING ===\n");
+    printf("Simulando %d procesos MPI con tolerancia a fallos\n\n", NUM_PROCESSES);
+
+    // Inicializar MPI simulado
+    MPI_Init(NULL, NULL);
+
+    // Crear threads para simular procesos MPI
+    pthread_t threads[NUM_PROCESSES];
+    int ranks[NUM_PROCESSES];
+
+    for (int i = 0; i < NUM_PROCESSES; i++) {
+        ranks[i] = i;
+        MPI_COMM_WORLD.rank = i; // Esto no es thread-safe, pero para demo está bien
+        pthread_create(&threads[i], NULL, process_main, &ranks[i]);
+        usleep(100000); // Pequeña pausa entre creación de threads
+    }
+
+    // Esperar a que terminen todos los threads
+    for (int i = 0; i < NUM_PROCESSES; i++) {
+        pthread_join(threads[i], NULL);
+    }
+
+    printf("\n=== SIMULACION COMPLETADA ===\n");
+    printf("Todos los procesos terminaron exitosamente\n");
+    printf("Se simuló fallo y recuperación en la iteración %d\n", FAILURE_ITERATION);
+
+    MPI_Finalize();
+    return 0;
+}
