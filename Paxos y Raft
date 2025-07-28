@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+"""
+distributed_sim.py
+Pequeña simulación en memoria de Raft (elección + replicación) y Paxos
+con 3 nodos y fallos controlados.
+
+author: tu_nombre
+"""
+
+import threading, queue, random, time
+from enum import Enum
+
+# ---------- utilidades comunes ------------------------------------------------
+MAJORITY = lambda n: (n // 2) + 1
+
+
+class MsgType(Enum):
+    # Raft
+    REQUEST_VOTE = 1
+    VOTE = 2
+    APPEND_ENTRIES = 3
+    HEARTBEAT = 4
+    # Paxos
+    PREPARE = 10
+    PROMISE = 11
+    ACCEPT = 12
+    ACCEPTED = 13
+
+
+class Message:
+    def __init__(self, mtype, src, dst, **data):
+        self.type, self.src, self.dst, self.data = mtype, src, dst, data
+
+
+# ---------- infraestructura de red en memoria ---------------------------------
+class Cluster:
+    def __init__(self, node_ids):
+        self.queues = {nid: queue.Queue() for nid in node_ids}
+        # nodos “apagados” -> mensajes se descartan
+        self.dead = set()
+
+    def send(self, msg: Message):
+        if msg.dst in self.dead:
+            return
+        self.queues[msg.dst].put(msg)
+
+    def kill(self, nid):
+        self.dead.add(nid)
+
+    def revive(self, nid):
+        self.dead.discard(nid)
+
+
+# ---------- Implementación básica de Raft -------------------------------------
+class RaftNode(threading.Thread):
+    def __init__(self, nid, peers, cluster: Cluster, apply_cb):
+        super().__init__(daemon=True)
+        self.nid, self.peers, self.cluster = nid, peers, cluster
+        # estado Raft
+        self.term = 0
+        self.state = "follower"  # follower | candidate | leader
+        self.voted_for = None
+        self.log_value = None
+        self.apply_cb = apply_cb
+        self.running = True
+        # timers
+        self.reset_election_timeout()
+        self.heartbeat_interval = 0.3
+        self.last_heartbeat = time.time()
+
+    # ------------------------------------------------------------------
+    def reset_election_timeout(self):
+        self.election_timeout = time.time() + random.uniform(0.7, 1.2)
+
+    def run(self):
+        q = self.cluster.queues[self.nid]
+        while self.running:
+            now = time.time()
+
+            # follower: ¿timeout de elección?
+            if self.state != "leader" and now >= self.election_timeout:
+                self.start_election()
+
+            # líder: enviar heartbeats
+            if self.state == "leader" and now - self.last_heartbeat >= self.heartbeat_interval:
+                self.broadcast(Message(MsgType.HEARTBEAT, self.nid, None, term=self.term))
+                self.last_heartbeat = now
+
+            # procesar mensajes
+            try:
+                msg = q.get(timeout=0.05)
+                self.handle(msg)
+            except queue.Empty:
+                pass
+
+    # ------------------------------------------------------------------
+    def broadcast(self, msg_template):
+        for p in self.peers:
+            self.cluster.send(Message(msg_template.type, msg_template.src, p, **msg_template.data))
+
+    # ------------------------------------------------------------------
+    def handle(self, m: Message):
+        if m.type == MsgType.HEARTBEAT or m.type == MsgType.APPEND_ENTRIES:
+            if m.data["term"] >= self.term:
+                self.term = m.data["term"]
+                self.state = "follower"
+                self.voted_for = None
+                self.reset_election_timeout()
+            return
+
+        if m.type == MsgType.REQUEST_VOTE:
+            granted = False
+            if (m.data["term"] > self.term) or (self.voted_for in (None, m.src)):
+                self.term = m.data["term"]
+                self.voted_for = m.src
+                granted = True
+                self.reset_election_timeout()
+            self.cluster.send(Message(MsgType.VOTE, self.nid, m.src, term=self.term, granted=granted))
+
+        elif m.type == MsgType.VOTE and self.state == "candidate":
+            if m.data["term"] == self.term and m.data["granted"]:
+                self.votes += 1
+                if self.votes >= MAJORITY(len(self.peers) + 1):
+                    self.become_leader()
+
+        elif m.type == MsgType.APPEND_ENTRIES and self.state != "leader":
+            # replicación real de valor
+            self.log_value = m.data["value"]
+            self.apply_cb(self.nid, self.log_value)
+
+    # ------------------------------------------------------------------
+    def start_election(self):
+        self.state, self.term = "candidate", self.term + 1
+        self.voted_for, self.votes = self.nid, 1  # votarse a sí mismo
+        self.reset_election_timeout()
+        self.broadcast(Message(MsgType.REQUEST_VOTE, self.nid, None, term=self.term))
+        print(f"[Raft] Nodo {self.nid} inicia elección T{self.term}")
+
+    def become_leader(self):
+        self.state = "leader"
+        self.last_heartbeat = 0
+        print(f"[Raft] Nodo {self.nid} es el NUEVO LÍDER (T{self.term})")
+        # primera replicación del valor
+        if self.log_value is None:
+            self.log_value = "A=1"
+            self.apply_cb(self.nid, self.log_value)
+            self.broadcast(Message(MsgType.APPEND_ENTRIES, self.nid, None,
+                                   term=self.term, value=self.log_value))
+
+    def stop(self):
+        self.running = False
+
+
+# ---------- Implementación minimal de Paxos -----------------------------------
+class Acceptor:
+    def __init__(self, nid):
+        self.nid = nid
+        self.promised_n = -1
+        self.accepted_n = -1
+        self.accepted_val = None
+
+
+def paxos_run(cluster: Cluster, acceptors, proposer_id, value, fail_after_prepare=False):
+    """
+    Un solo round Paxos (sin multi-paxos)
+    """
+    proposal_n = random.randint(100, 999)
+    majority = MAJORITY(len(acceptors))
+    promises = []
+    # 1. prepare
+    for acc in acceptors.values():
+        if acc.nid == proposer_id and fail_after_prepare:
+            continue  # simulamos fallo del proponente
+        if proposal_n > acc.promised_n:
+            acc.promised_n = proposal_n
+            promises.append(acc)
+    if len(promises) < majority:
+        print("[Paxos] Propuesta abortada, sin mayoría en prepare()")
+        return None
+    # 2. accept phase
+    accepted = []
+    for acc in promises:
+        if proposal_n >= acc.promised_n:
+            acc.promised_n = acc.accepted_n = proposal_n
+            acc.accepted_val = value
+            accepted.append(acc)
+    if len(accepted) >= majority:
+        print(f"[Paxos] ✅ Consenso alcanzado sobre '{value}' con N={proposal_n}")
+        return value
+    print("[Paxos] Falló fase accept()")
+    return None
+
+
+# ---------- Demonio de aplicación --------------------------------------------
+def raft_demo():
+    print("=== DEMO RAFT ===")
+    node_ids = [0, 1, 2]
+    cluster = Cluster(node_ids)
+    replicated = {}
+
+    def apply_cb(nid, val):
+        replicated[nid] = val
+        print(f"    ↳ Nodo {nid} aplicó el valor '{val}'")
+
+    nodes = {nid: RaftNode(nid, [p for p in node_ids if p != nid], cluster, apply_cb)
+             for nid in node_ids}
+    for n in nodes.values():
+        n.start()
+
+    # dejar correr un poco
+    time.sleep(3)
+    # matar al líder actual
+    leader = next(n for n in nodes.values() if n.state == "leader")
+    print(f"\n*** Fallo simulado: apagando líder {leader.nid} ***\n")
+    cluster.kill(leader.nid)
+    leader.stop()
+
+    # esperar reelección
+    time.sleep(5)
+
+    for n in nodes.values():
+        n.stop()
+    print("\nEstado replicado en nodos vivos:", replicated)
+    print("=== FIN RAFT ===\n")
+
+
+def paxos_demo():
+    print("=== DEMO PAXOS ===")
+    node_ids = [0, 1, 2]
+    cluster = Cluster(node_ids)  # no se usa realmente, pero mantenemos firma
+    acceptors = {nid: Acceptor(nid) for nid in node_ids}
+
+    print("\n-- Ronda 1: Proponente 0 obtiene consenso --")
+    paxos_run(cluster, acceptors, proposer_id=0, value="X=42")
+
+    print("\n-- Ronda 2: Proponente 1 intenta un valor distinto y FRACASA --")
+    paxos_run(cluster, acceptors, proposer_id=1, value="X=99")
+
+    print("\n-- Ronda 3: Proponente 0 falla tras prepare(); Proponente 2 completa consenso --")
+    paxos_run(cluster, acceptors, proposer_id=0, value="X=123", fail_after_prepare=True)
+    paxos_run(cluster, acceptors, proposer_id=2, value="X=123")
+
+    print("\nValores aceptados por cada aceptor:")
+    for a in acceptors.values():
+        print(f"  Acceptor {a.nid}: {a.accepted_val} (n={a.accepted_n})")
+    print("=== FIN PAXOS ===\n")
+
+
+if __name__ == "__main__":
+    raft_demo()
+    paxos_demo()
