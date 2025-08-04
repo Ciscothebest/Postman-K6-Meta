@@ -1,0 +1,238 @@
+import time
+import re
+import random
+from collections import defaultdict, Counter
+
+class SparkSimulatorOneCompiler:
+    """Simulador de Spark optimizado para OneDrive"""
+    
+    def __init__(self, app_name="SparkTextAnalysis"):
+        print("🚀 SIMULADOR DE SPARK - ONEDRIVE")
+        print("=" * 45)
+        self.app_name = app_name
+        print(f"✅ Aplicación: {app_name}")
+        print("📝 Simulando conceptos de Apache Spark")
+        print()
+    
+    def generate_small_dataset(self):
+        """Genera dataset pequeño en memoria para ONEDRIVE"""
+        print("📁 Generando dataset de texto...")
+        
+        words = [
+            'spark', 'python', 'data', 'analysis', 'processing', 'machine', 'learning',
+            'algorithm', 'model', 'training', 'prediction', 'classification', 'big',
+            'dataset', 'framework', 'apache', 'distributed', 'computing', 'optimization',
+            'performance', 'scalability', 'the', 'and', 'or', 'but', 'in', 'on', 'at',
+            'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through'
+        ]
+        
+        # Generar líneas en memoria (más eficiente para OneCompiler)
+        lines = []
+        for _ in range(10000):  # 10K líneas
+            line_length = random.randint(8, 15)
+            line_words = [random.choice(words) for _ in range(line_length)]
+            line = ' '.join(line_words)
+            lines.append(line)
+        
+        print(f"✅ Dataset generado: {len(lines)} líneas en memoria")
+        return lines
+    
+    def clean_word(self, word):
+        """Limpia y normaliza palabras"""
+        cleaned = re.sub(r'[^\w]', '', word.lower())
+        return cleaned if len(cleaned) > 2 else None
+    
+    def simulate_rdd_operations(self, lines):
+        """Simula operaciones RDD: flatMap → map → reduceByKey"""
+        print("\n📝 SIMULANDO RDD OPERATIONS")
+        print("-" * 30)
+        start_time = time.time()
+        
+        print("🔄 Paso 1: textFile() - Cargar datos")
+        # Simular carga de RDD
+        rdd_lines = lines.copy()
+        
+        print("🔄 Paso 2: flatMap() - Dividir en palabras")
+        # flatMap: cada línea → lista de palabras
+        all_words = []
+        for line in rdd_lines:
+            words = line.split()
+            all_words.extend(words)
+        
+        print("🔄 Paso 3: map() - Limpiar palabras")
+        # map: aplicar limpieza a cada palabra
+        cleaned_words = []
+        for word in all_words:
+            cleaned = self.clean_word(word)
+            if cleaned:
+                cleaned_words.append(cleaned)
+        
+        print("🔄 Paso 4: map() - Crear pares (palabra, 1)")
+        # map: palabra → (palabra, 1)
+        word_pairs = [(word, 1) for word in cleaned_words]
+        
+        print("🔄 Paso 5: reduceByKey() - Contar palabras")
+        # reduceByKey: agrupar y sumar
+        word_counts = defaultdict(int)
+        for word, count in word_pairs:
+            word_counts[word] += count
+        
+        print("🔄 Paso 6: sortBy() - Ordenar resultados")
+        # sortBy: ordenar por frecuencia
+        sorted_results = sorted(word_counts.items(), key=lambda x: x[1], reverse=True)
+        
+        end_time = time.time()
+        execution_time = end_time - start_time
+        
+        print(f"✅ RDD completado en {execution_time:.3f} segundos")
+        print(f"📊 Palabras procesadas: {len(cleaned_words)}")
+        print(f"📊 Palabras únicas: {len(word_counts)}")
+        
+        return execution_time, len(word_counts), sorted_results[:20]
+    
+    def simulate_dataframe_operations(self, lines):
+        """Simula operaciones DataFrame optimizadas"""
+        print("\n📊 SIMULANDO DATAFRAME OPERATIONS")
+        print("-" * 35)
+        start_time = time.time()
+        
+        print("🔄 Paso 1: read.text() - Crear DataFrame")
+        # Simular DataFrame
+        df_lines = lines.copy()
+        
+        print("🔄 Paso 2: explode(split()) - Optimización vectorizada")
+        # Operación vectorizada más eficiente
+        all_words = []
+        for line in df_lines:
+            words = line.split()
+            all_words.extend(words)
+        
+        print("🔄 Paso 3: Aplicar transformaciones SQL")
+        # Simular optimizaciones de Catalyst
+        cleaned_words = []
+        for word in all_words:
+            cleaned = self.clean_word(word)
+            if cleaned:
+                cleaned_words.append(cleaned)
+        
+        print("🔄 Paso 4: groupBy().count() - Agregación optimizada")
+        # Counter es más eficiente (simula optimizaciones)
+        word_counts = Counter(cleaned_words)
+        
+        print("🔄 Paso 5: orderBy() - Ordenamiento optimizado")
+        # most_common() es más eficiente
+        sorted_results = word_counts.most_common()
+        
+        end_time = time.time()
+        execution_time = end_time - start_time
+        
+        print(f"✅ DataFrame completado en {execution_time:.3f} segundos")
+        print(f"📊 Palabras procesadas: {len(cleaned_words)}")
+        print(f"📊 Palabras únicas: {len(word_counts)}")
+        
+        return execution_time, len(word_counts), sorted_results[:20]
+    
+    def analyze_performance(self, rdd_time, df_time, rdd_results, df_results):
+        """Analiza diferencias de rendimiento"""
+        print("\n" + "="*50)
+        print("📈 ANÁLISIS DE RENDIMIENTO SPARK")
+        print("="*50)
+        
+        speedup = rdd_time / df_time if df_time > 0 else 1
+        efficiency = ((rdd_time - df_time) / rdd_time) * 100 if rdd_time > 0 else 0
+        
+        print(f"⏱️  Tiempo RDD:       {rdd_time:.3f} segundos")
+        print(f"⏱️  Tiempo DataFrame: {df_time:.3f} segundos")
+        print(f"🚀 Speedup:          {speedup:.2f}x")
+        print(f"📊 Mejora:           {efficiency:.1f}%")
+        
+        print(f"\n🔍 COMPARACIÓN DETALLADA:")
+        print(f"{'Método':<12} {'Tiempo':<10} {'Rendimiento'}")
+        print("-" * 35)
+        print(f"{'RDD':<12} {rdd_time:<10.3f} {'Baseline'}")
+        print(f"{'DataFrame':<12} {df_time:<10.3f} {f'{speedup:.1f}x mejor'}")
+        
+        print(f"\n💡 ¿POR QUÉ DATAFRAMES SON MÁS RÁPIDOS?")
+        print("🔧 Optimizaciones de DataFrames:")
+        print("   • Catalyst Optimizer: Optimiza el plan de ejecución")
+        print("   • Tungsten Engine: Gestión eficiente de memoria")
+        print("   • Code Generation: Genera código Java optimizado")
+        print("   • Predicate Pushdown: Aplica filtros temprano")
+        print("   • Columnar Storage: Mejor compresión y cache")
+        
+        print("\n⚙️  Características de RDDs:")
+        print("   • API de bajo nivel más flexible")
+        print("   • Control granular de operaciones")
+        print("   • Sin optimizaciones automáticas")
+        print("   • Mejor para datos no estructurados")
+        
+        return speedup, efficiency
+    
+    def show_top_words(self, results, title="TOP PALABRAS"):
+        """Muestra las palabras más frecuentes"""
+        print(f"\n📊 {title}")
+        print("-" * 30)
+        for i, (word, count) in enumerate(results[:10], 1):
+            print(f"{i:2d}. {word:<12} {count:>6}")
+    
+    def run_complete_analysis(self):
+        """Ejecuta análisis completo optimizado para OneCompiler"""
+        print("🎯 INICIANDO ANÁLISIS COMPLETO")
+        print("=" * 35)
+        
+        # 1. Generar dataset en memoria
+        lines = self.generate_small_dataset()
+        
+        # 2. Ejecutar simulación RDD
+        rdd_time, rdd_total, rdd_top = self.simulate_rdd_operations(lines)
+        
+        # 3. Ejecutar simulación DataFrame
+        df_time, df_total, df_top = self.simulate_dataframe_operations(lines)
+        
+        # 4. Análisis de rendimiento
+        speedup, efficiency = self.analyze_performance(rdd_time, df_time, rdd_top, df_top)
+        
+        # 5. Mostrar resultados
+        self.show_top_words(rdd_top, "TOP PALABRAS MÁS FRECUENTES")
+        
+        print(f"\n🎉 ANÁLISIS COMPLETADO")
+        print(f"📈 Speedup obtenido: {speedup:.2f}x")
+        print(f"📊 Eficiencia ganada: {efficiency:.1f}%")
+        print(f"🔤 Palabras únicas encontradas: {rdd_total}")
+        
+        return {
+            'rdd_time': rdd_time,
+            'df_time': df_time,
+            'speedup': speedup,
+            'efficiency': efficiency,
+            'total_words': rdd_total
+        }
+
+# EJECUCIÓN PRINCIPAL OPTIMIZADA PARA ONECOMPILER
+if __name__ == "__main__":
+    print("🔥 APACHE SPARK SIMULATOR")
+    print("🌐 Optimizado para OneCompiler")
+    print("📚 Demostrando conceptos de Big Data")
+    print()
+    
+    # Crear y ejecutar simulador
+    simulator = SparkSimulatorOneCompiler("TextAnalysisDemo")
+    
+    try:
+        results = simulator.run_complete_analysis()
+        
+        print(f"\n✨ RESUMEN EJECUTIVO:")
+        print(f"🚀 DataFrames son {results['speedup']:.2f}x más rápidos")
+        print(f"📊 Mejora de eficiencia: {results['efficiency']:.1f}%")
+        print(f"🔤 Total palabras únicas: {results['total_words']}")
+        print(f"\n🎓 CONCEPTOS APRENDIDOS:")
+        print("   • RDDs vs DataFrames en Spark")
+        print("   • Optimizaciones del Catalyst Optimizer")
+        print("   • Operaciones de Word Count distribuido")
+        print("   • Análisis de rendimiento en Big Data")
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+    
+    print(f"\n🎯 ¡Simulación de Spark completada!")
+    print("📖 Código listo para Francisco's Desk")
